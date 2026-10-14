@@ -1,0 +1,42 @@
+# 排程範例：每週一檢查 Claude Code CLI 新版是否仍與本系統相容（旗標、hook 欄位會隨版本調整）。
+#
+# 為什麼雲端排程只做這件事：GitHub Actions 與 Routines 都在雲端執行，碰不到你電腦上的上傳檔、
+# 語音辨識模型與監控介面，所以「整理學習資料」本身不適合放在這裡；本機自動觸發請用
+#   python3 -m learnloop watch <收件匣資料夾>
+#
+# 使用前：到 repo 的 Settings → Secrets 新增 ANTHROPIC_API_KEY（金鑰只放 secrets，不要進 repo）。
+# 注意：排程只會在預設分支執行；公開 repo 連續 60 天沒有活動，GitHub 會自動停用排程。
+name: scheduled-compat
+on:
+  schedule:
+    - cron: "17 1 * * 1"   # 每週一 09:17（台北時間）
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
+      - run: pip install -r requirements.txt
+      - name: 自動測試
+        run: python3 -m unittest discover -s tests -v
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            執行 `claude --help`，比對 scripts/loop.sh、scripts/dev-loop.sh 與 learnloop/runner.py 用到的旗標與選項
+            （--system-prompt、--tools、--allowedTools、--permission-mode dontAsk、--max-turns、--max-budget-usd、
+            --setting-sources、--settings、--output-format json、--resume、-w）。
+            任何一個不存在或說明有變，就用 `gh issue create` 開一張 issue 說明差異與建議修法；都相容就不要開 issue。
+            不要修改任何檔案。
+          claude_args: >-
+            --max-turns 15
+            --max-budget-usd 1.00
+            --allowedTools "Read,Grep,Glob,Bash(claude --help),Bash(claude --version),Bash(gh issue create *),Bash(gh issue list *)"

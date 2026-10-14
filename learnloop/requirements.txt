@@ -1,0 +1,13 @@
+# 必要
+claude-agent-sdk>=0.2.159     # 內建 Claude Code CLI；模擬模式（LP_MOCK=1）不需要
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9       # 檔案上傳
+jsonschema>=4.20              # 閘門的資料契約檢查
+pypdf>=5.0                    # PDF
+python-docx>=1.1              # Word
+python-pptx>=1.0              # 讀 PowerPoint 來源、輸出 .pptx
+
+# 選用（需要時再裝）
+# faster-whisper>=1.0         # 音檔／影片語音辨識；不裝的話請上傳同檔名的 .srt／.vtt
+# cairosvg>=2.7               # 把示意圖放進 PowerPoint（HTML 版不需要）
