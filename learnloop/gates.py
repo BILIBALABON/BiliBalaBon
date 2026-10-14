@@ -273,6 +273,21 @@ def gate_ingest(pdir: Path, cfg: Config, target: str | None = None) -> GateResul
     return res
 
 
+# 每份簡報固定要有的頁面：封面、學習目標、重點回顧、參考資料，以及（找到影片時）影片頁
+FIXED_SLIDES = 5
+
+
+def deck_limits(settings: dict, cfg: Config) -> tuple[int, int, int, int]:
+    """回傳（最少張數, 最多張數, 目標張數, 大綱章節上限）。
+
+    章節上限讓大綱與張數相容：每章至少一張內容與一題測驗，再加上固定頁面。
+    沒有這道限制時，實測期望 6 張的專案被排了 4 章，簡報至少要 12 張，編排者怎麼改都過不了張數檢查。
+    """
+    target = int(settings.get("slide_target") or 12)
+    lo, hi = cfg.min_slides, max(int(target * 1.5), cfg.min_slides + 2)
+    return lo, hi, target, max(2, min(8, (hi - FIXED_SLIDES) // 2))
+
+
 def gate_plan(pdir: Path, cfg: Config, target: str | None = None) -> GateResult:
     res = GateResult()
     data = _load_json(pdir / "work" / "outline.json", "work/outline.json", res)
@@ -292,6 +307,11 @@ def gate_plan(pdir: Path, cfg: Config, target: str | None = None) -> GateResult:
             used.add(r)
     for sid in sorted(material - used):
         res.err(f"outline.json：教材 {sid} 沒有被任何章節引用，請把它的內容排進大綱")
+    _, hi, target_n, max_sec = deck_limits(_project_meta(pdir).get("settings", {}), cfg)
+    if len(ids) > max_sec:
+        res.err(f"outline.json：有 {len(ids)} 章，但期望約 {target_n} 張投影片（最多 {hi} 張）只容得下 {max_sec} 章"
+                f"（每章至少一張內容與一題測驗，另有封面、學習目標、重點回顧、參考資料等固定頁）。"
+                "請合併相關章節，次要內容留給筆記")
     return res
 
 
@@ -436,8 +456,7 @@ def gate_compose(pdir: Path, cfg: Config, target: str | None = None) -> GateResu
     for d in _dupes([s["id"] for s in slides]):
         res.err(f"deck.json：投影片代號 {d} 重複")
     settings = _project_meta(pdir).get("settings", {})
-    target_n = int(settings.get("slide_target") or 12)
-    lo, hi = cfg.min_slides, max(int(target_n * 1.5), cfg.min_slides + 2)
+    lo, hi, target_n, _ = deck_limits(settings, cfg)
     if not lo <= len(slides) <= hi:
         res.err(f"deck.json：共 {len(slides)} 張投影片，需介於 {lo}–{hi} 張（目標 {target_n} 張）")
     layouts = [s["layout"] for s in slides]

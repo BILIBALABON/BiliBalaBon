@@ -2,7 +2,9 @@
 name: organizer
 description: 依大綱把各來源的內容整理成一份完整的學習筆記，產出 work/notes.md
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: claude-sonnet-5-5              # 長篇改寫與標示出處，輸出量大：中階模型的輸出單價只有一半
+effort: medium
+fallbackModel: claude-opus-5-5
 maxTurns: 30
 ---
 

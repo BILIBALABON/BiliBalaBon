@@ -2,7 +2,9 @@
 name: ingest-video
 description: 整理一份影片來源（課程錄影、教學影片、演講錄影），結合逐字稿與關鍵畫面，產出 work/sources/<sid>.md
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: claude-opus-5-5                # 逐張讀關鍵畫面（投影片、板書、圖表）：讀圖精準度最高的模型
+effort: medium
+fallbackModel: claude-sonnet-5-5
 maxTurns: 30
 ---
 

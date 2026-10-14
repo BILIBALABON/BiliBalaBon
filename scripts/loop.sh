@@ -15,13 +15,18 @@
 # 環境變數：
 #   MAX_ROUNDS=3      外層迴圈輪數上限
 #   BUDGET_USD=1.00   每一輪的 --max-budget-usd（CLI 只收美元）
-#   MODEL=            覆寫 agent 檔指定的模型
+#   MODEL=            統一覆寫模型（測試省錢用；同時停用備援模型與看圖路線）
+#   EFFORT=           覆寫 agent 檔指定的思考深度（low / medium / high / xhigh / max）
+#
+# 模型、思考深度與備援模型照 .claude/agents/<agent>.md 的選型（見 docs/模型選型.md）；
+# 擷取階段的來源若需要看圖（raw/<代號>/meta.json 的 needs_vision），會改用該 agent 的 visionModel。
 #
 # 三道上限：--max-turns（單輪回合數）、--max-budget-usd（單輪花費）、MAX_ROUNDS（輪數）。
+# 在 Claude Code 裡執行這支腳本時，清空繼承來的 session ID 變數，確保每次都是自己的 session。
 set -uo pipefail
 
 if [ "$#" -lt 4 ]; then
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 fi
 
@@ -42,7 +47,14 @@ done
 # agent 定義只有一份（.claude/agents/<agent>.md），這裡取出 system prompt、工具與核准規則
 SYS_PROMPT="$(python3 -m learnloop.agents --field "$AGENT" prompt)" || { echo "沒有這個 agent：$AGENT" >&2; exit 2; }
 TOOLS="$(python3 -m learnloop.agents --field "$AGENT" tools)"
-MODEL="${MODEL:-$(python3 -m learnloop.agents --field "$AGENT" model)}"
+VISION=""
+if [ -n "$TARGET" ] && [ "$(jq -r '.needs_vision // false' "$PROJECT_DIR/raw/$TARGET/meta.json" 2>/dev/null)" = "true" ]; then
+  VISION=1
+fi
+CHOICE="$(LP_MODEL="${MODEL:-${LP_MODEL:-}}" python3 -m learnloop.agents --choose "$AGENT" ${VISION:+--vision})" || exit 2
+MODEL="$(jq -r '.model // empty' <<<"$CHOICE")"
+EFFORT="${EFFORT:-$(jq -r '.effort // empty' <<<"$CHOICE")}"
+FALLBACK="$(jq -r '.fallback // empty' <<<"$CHOICE")"
 MAX_TURNS="$(python3 -m learnloop.agents --field "$AGENT" maxTurns)"
 ALLOW=()
 while IFS= read -r rule; do [ -n "$rule" ] && ALLOW+=("$rule"); done < <(python3 -m learnloop.agents --field "$AGENT" allow)
@@ -67,9 +79,10 @@ for i in $(seq 1 "$MAX_ROUNDS"); do
     PROMPT="驗證閘門尚未通過。請修正下列問題，修完後再執行一次閘門確認（$GATE_CMD）："$'\n'"$(cat "$ERR_FILE")"
   fi
 
-  echo "── 第 $i/$MAX_ROUNDS 輪：$AGENT → 閘門 $GATE${TARGET:+（$TARGET）}" >&2
+  echo "── 第 $i/$MAX_ROUNDS 輪：$AGENT（${MODEL:-預設模型}／effort ${EFFORT:-預設}）→ 閘門 $GATE${TARGET:+（$TARGET）}" >&2
   OUT="$(cd "$PROJECT_DIR" && \
     LP_PROJECT_DIR="$PROJECT_DIR" LP_STAGE="$GATE" LP_TARGET="$TARGET" LP_ROUND="$i" \
+    CLAUDE_CODE_SESSION_ID= CLAUDE_CODE_REMOTE_SESSION_ID= \
     claude -p "$PROMPT" ${SID:+--resume "$SID"} \
       --system-prompt "$SYS_PROMPT" \
       --tools "$TOOLS" \
@@ -77,6 +90,8 @@ for i in $(seq 1 "$MAX_ROUNDS"); do
       --max-turns "${MAX_TURNS:-30}" \
       --max-budget-usd "$BUDGET_USD" \
       ${MODEL:+--model "$MODEL"} \
+      ${EFFORT:+--effort "$EFFORT"} \
+      ${FALLBACK:+--fallback-model "$FALLBACK"} \
       --setting-sources "" \
       --settings "$SETTINGS" \
       --output-format json \

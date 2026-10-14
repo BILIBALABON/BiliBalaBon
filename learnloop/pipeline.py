@@ -23,6 +23,7 @@ from datetime import date
 from pathlib import Path
 
 from . import STAGE_LABELS, STAGES, gates, schemas
+from .agents import ModelChoice, choose_model, load_agents
 from .config import Config
 from .preprocess import MissingDependency, is_fresh, preprocess_source, upload_sig
 from .project import Project, atomic_write_json, blank_state, now_iso, read_json
@@ -68,6 +69,7 @@ class Pipeline:
         self._budget_lock = asyncio.Lock()
         self._sem = asyncio.Semaphore(max(1, self.cfg.max_parallel))
         self.flags: dict = read_json(self.p.state_dir / "flags.json", {}) or {}
+        self.specs = load_agents(with_shared=False)  # 只用來決定模型；system prompt 由 runner 自己載入
 
     # ---- 狀態與事件 -------------------------------------------------------
     def _save(self) -> None:
@@ -152,6 +154,16 @@ class Pipeline:
                 self.st["status"] = "running"
                 self._save()
 
+    # ---- 模型選型 ---------------------------------------------------------
+    def _model_choice(self, role: str, target: str | None = None) -> ModelChoice:
+        """依 agent 檔的選型決定模型；來源必須看圖（掃描檔、照片、沒有音軌的影片）時走 visionModel。"""
+        meta = read_json(self.p.raw / target / "meta.json", {}) if target else {}
+        return choose_model(self.specs[role], self.cfg.model_override,
+                            vision=bool(isinstance(meta, dict) and meta.get("needs_vision")))
+
+    def _record_model(self, holder: dict, choice: ModelChoice) -> None:
+        holder.update(model=choice.model, effort=choice.effort, vision=choice.vision)
+
     # ---- 外層迴圈 ---------------------------------------------------------
     async def _attempts(self, *, stage: str, gate: str, role: str, prompt: str, target: str | None,
                         worker: str | None, session: str | None, note: str, parallel: int,
@@ -165,9 +177,11 @@ class Pipeline:
             holder["attempts"] = holder.get("attempts", 0) + 1
             if worker:
                 self._stage(stage)["attempts"] = max(self._stage(stage).get("attempts", 0), holder["attempts"])
+            choice = self._model_choice(role, target)
+            self._record_model(holder, choice)
             self._save()
             self.emit("attempt_started", stage=stage, worker=worker, role=role,
-                      attempt=attempt, max_attempts=self.cfg.max_attempts)
+                      attempt=attempt, max_attempts=self.cfg.max_attempts, **choice.as_dict())
             if attempt == 1 and not session:
                 text = prompt + (f"\n\n使用者補充的指示：{note}" if note else "")
             else:
@@ -176,7 +190,7 @@ class Pipeline:
                 last = await self.runner.run(
                     role=role, prompt=text, project_dir=self.p.dir, gate=gate, target=target,
                     resume=session, budget_usd=self.session_budget(stage, parallel), emit=self._emit_for(stage, worker),
-                    label=label, round_no=holder["attempts"])
+                    label=label, round_no=holder["attempts"], choice=choice)
             session = last.session_id or session
             self._add_cost(stage, last.cost_usd, worker)
             self.emit("cost", stage=stage, worker=worker, usd=last.cost_usd,
@@ -202,7 +216,7 @@ class Pipeline:
         lines = ["驗證閘門尚未通過。請修正下列問題，修完後再執行一次閘門確認："] if errors else \
                 ["請繼續完成任務，完成後執行閘門確認："]
         lines += [f"- {e}" for e in errors[:25]]
-        lines.append(f"\n閘門指令：{cmd}")
+        lines.append(f"\n閘門指令（單獨執行這一道，不要加 ; echo、&&、管線或 cd，否則會被拒絕）：{cmd}")
         if note:
             lines.append(f"\n使用者補充的指示：{note}")
         return "\n".join(lines)
@@ -315,13 +329,14 @@ class Pipeline:
     # ---- 任務說明 ---------------------------------------------------------
     def _context(self) -> str:
         s, meta = self.p.settings, self.p.meta
+        lo, hi, target_n, max_sec = gates.deck_limits(s, self.cfg)
         lines = [
             f"專案：{meta.get('title', '')}",
             f"撰寫語言：{s['language']}",
             f"對象：{s['audience'] or '未指定（以一般大學程度的學習者為準）'}",
             f"學習目的：{s['goal'] or '未指定'}",
-            f"期望投影片張數：約 {int(s['slide_target'] or 12)} 張（目標值；允許 {self.cfg.min_slides}–"
-            f"{max(int(int(s['slide_target'] or 12) * 1.5), self.cfg.min_slides + 2)} 張）",
+            f"期望投影片張數：約 {target_n} 張（目標值；允許 {lo}–{hi} 張）",
+            f"大綱章節上限：{max_sec} 章（每章至少一張內容與一題測驗，另有封面、學習目標、重點回顧、參考資料等固定頁）",
             f"今天日期：{date.today().isoformat()}",
         ]
         if s.get("notes"):
@@ -490,14 +505,16 @@ class Pipeline:
         for attempt in range(1, self.cfg.max_attempts + 1):
             await self.ensure_budget("review")
             self._stage("review")["attempts"] += 1
+            choice = self._model_choice("reviewer")
+            self._record_model(self._stage("review"), choice)
             self._save()
             self.emit("attempt_started", stage="review", role="reviewer", attempt=attempt,
-                      max_attempts=self.cfg.max_attempts, round=round_no)
+                      max_attempts=self.cfg.max_attempts, round=round_no, **choice.as_dict())
             async with self._sem:
                 res = await self.runner.run(
                     role="reviewer", prompt=prompt, project_dir=self.p.dir, gate=None, budget_usd=self.session_budget("review"),
                     emit=self._emit_for("review", None), output_schema=schemas.REVIEW, label="review",
-                    round_no=self._stage("review")["attempts"])
+                    round_no=self._stage("review")["attempts"], choice=choice)
             self._add_cost("review", res.cost_usd)
             self.emit("cost", stage="review", usd=res.cost_usd, total_ntd=round(self.cfg.usd_to_ntd(self.st["cost_usd"]), 2))
             if res.fatal:

@@ -595,9 +595,10 @@ function renderStage() {
     <dt>狀態</dt><dd><span class="tag ${esc(d.status)}">${SSTAT[d.status] || esc(d.status)}</span></dd>
     <dt>已跑輪數</dt><dd>${Number(d.attempts) || 0}${["preprocess", "publish"].includes(selStage) ? "（這個階段不使用模型）" : `／每回合上限 ${SYS.limits.max_attempts}`}</dd>
     <dt>花費</dt><dd>約 NT$${(usd * SYS.usd_twd_rate).toFixed(1)}</dd>
+    ${d.model && !ws.length ? `<dt>模型</dt><dd>${esc(modelText(d))}</dd>` : ""}
     ${d.started_at ? `<dt>開始</dt><dd>${fmtTime(d.started_at)}${d.ended_at ? "　結束 " + fmtTime(d.ended_at) : ""}</dd>` : ""}</dl>`;
-  if (ws.length) h += `<h3>${selStage === "verify" ? "平行工作" : "各來源"}</h3><table class="wtable"><tr><th>對象</th><th>狀態</th><th>輪數</th><th>未通過的檢查</th></tr>${ws.map(([k, w]) =>
-    `<tr><td>${esc(w.label || k)}${w.label && w.label !== k ? ` <span class="hint">${esc(k)}</span>` : ""}</td><td><span class="tag ${esc(w.status)}">${SSTAT[w.status] || esc(w.status)}</span></td><td>${Number(w.attempts) || 0}</td><td>${w.gate && !w.gate.ok ? esc(w.gate.errors[0] || "") + (w.gate.errors.length > 1 ? `（另 ${w.gate.errors.length - 1} 項）` : "") : ""}</td></tr>`).join("")}</table>`;
+  if (ws.length) h += `<h3>${selStage === "verify" ? "平行工作" : "各來源"}</h3><table class="wtable"><tr><th>對象</th><th>狀態</th><th>輪數</th><th>模型</th><th>未通過的檢查</th></tr>${ws.map(([k, w]) =>
+    `<tr><td>${esc(w.label || k)}${w.label && w.label !== k ? ` <span class="hint">${esc(k)}</span>` : ""}</td><td><span class="tag ${esc(w.status)}">${SSTAT[w.status] || esc(w.status)}</span></td><td>${Number(w.attempts) || 0}</td><td>${esc(modelText(w))}</td><td>${w.gate && !w.gate.ok ? esc(w.gate.errors[0] || "") + (w.gate.errors.length > 1 ? `（另 ${w.gate.errors.length - 1} 項）` : "") : ""}</td></tr>`).join("")}</table>`;
   if (g) h += `<h3>最近一次檢查：${g.ok ? "通過" : "未通過"}</h3>${gateList(g) || '<p class="hint">沒有問題。</p>'}`;
   if (selStage === "review" && cur.review) h += reviewHtml(cur.review);
   if (!busy() && cur.sources.length && cur.state.status !== "draft")
@@ -629,6 +630,11 @@ function renderOut() {
 }
 
 /* ---------- 即時紀錄 ---------- */
+// 模型選型顯示：claude-sonnet-5-5 → Sonnet 5.5（字串來自狀態檔，呼叫端一律再跳脫）
+function modelText(o) {
+  const m = String(o.model || "").replace(/^claude-/, "").replace(/^([a-z]+)-(\d+)-(\d+)$/, (_, n, a, b) => `${n[0].toUpperCase()}${n.slice(1)} ${a}.${b}`);
+  return m ? `${m}／effort ${o.effort || "預設"}${o.vision ? "（看圖）" : ""}` : "";
+}
 function describe(e) {
   const w = e.worker ? `（${e.worker}）` : "";
   switch (e.type) {
@@ -639,7 +645,7 @@ function describe(e) {
     case "stage_passed": return ["good", `通過${e.attempts > 1 ? `（共 ${e.attempts} 輪）` : ""}`];
     case "worker_started": return ["", `開始處理${w}${e.file ? " " + e.file : ""}`];
     case "worker_done": return [e.status === "passed" ? "good" : "", `${w}${SSTAT[e.status] || e.status}`];
-    case "attempt_started": return ["", `第 ${e.attempt}／${e.max_attempts} 輪${w}：啟動 ${e.role}`];
+    case "attempt_started": return ["", `第 ${e.attempt}／${e.max_attempts} 輪${w}：啟動 ${e.role}${e.model ? `（${modelText(e)}）` : ""}`];
     case "agent_activity": return ["act", `${e.label && e.label !== e.stage ? e.label + "｜" : ""}${e.text}`];
     case "agent_error": return ["bad", `agent 未正常結束${w}：${e.error || e.subtype}`];
     case "gate_result": return e.ok ? ["good", `檢查通過${w}`] : ["bad", `檢查未通過${w}：${(e.errors || [])[0] || ""}${(e.errors || []).length > 1 ? `（另 ${e.errors.length - 1} 項）` : ""}`];

@@ -2,7 +2,8 @@
 name: reviewer
 description: 出版前的獨立審核。唯讀：檢查簡報與定稿筆記的正確性與可閱讀性，回傳結構化的審核結果
 tools: Read, Grep, Glob, WebSearch, WebFetch
-model: opus
+model: claude-opus-5-5                # 最後一道判斷：大量輸入裡挑錯、少誤報；不設備援，避免悄悄換成較弱的審核者
+effort: high
 maxTurns: 25
 ---
 

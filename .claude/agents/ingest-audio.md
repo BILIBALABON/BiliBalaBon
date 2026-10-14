@@ -2,7 +2,9 @@
 name: ingest-audio
 description: 整理一份音檔來源（上課錄音、演講、小組討論）的逐字稿，產出 work/sources/<sid>.md
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: claude-sonnet-5-5              # 要靠領域知識還原語音辨識的同音錯字：需要中階模型的知識量
+effort: medium
+fallbackModel: claude-opus-5-5
 maxTurns: 25
 ---
 

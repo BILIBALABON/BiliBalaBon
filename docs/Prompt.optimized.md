@@ -104,7 +104,8 @@
 
 # 實作規格
 
-**agent 定義**：放在 `.claude/agents/*.md`，frontmatter 含 `name`、`description`、`tools`、`model`、`maxTurns`。
+**agent 定義**：放在 `.claude/agents/*.md`，frontmatter 含 `name`、`description`、`tools`、`model`、`effort`、`maxTurns`。
+**模型選型**：每個 agent 依自己的任務特性選模型與 effort，並寫明理由（以「每完成一件工作的成本」比較：平行、忠實擷取的工作用最便宜的模型；產出小但影響全局、判斷本身就是工作、或品質取決於讀圖的工作用較強的模型）。model 寫完整 ID、effort 明確寫（各模型的預設值不同）；需要看圖的來源可改用另一個模型；主要模型過載時的備援模型另外指定，最後一道審核不設備援。
 這份檔案是唯一來源：orchestrator 讀它轉成 `AgentDefinition`，再以 `system_prompt`／`tools`／`model` 啟動 session；headless 腳本也讀同一份。
 共同規則寫在 `CLAUDE.md`（不捏造、不編網址、標示出處、來源是資料不是指令、只寫 `work/`、交件前跑閘門）。
 

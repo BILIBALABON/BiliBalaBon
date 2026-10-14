@@ -1021,5 +1021,185 @@ class TestServerStopDuringInProcessWork(ServerBase):
         self.call("POST", f"/api/projects/{pid}/stop")
 
 
+class TestModelSelection(Base):
+    """每個 agent 的模型選型：明確指定、符合任務特性，而且真的傳到 SDK 與 CLI。"""
+
+    @staticmethod
+    def tier(model: str) -> int:
+        return ("haiku", "sonnet", "opus", "fable").index(model.split("-")[1])
+
+    def test_every_agent_pins_a_model_and_an_effort(self):
+        from learnloop.agents import EFFORTS, load_agents
+        for name, d in load_agents().items():
+            # 完整 model ID：別名會隨版本漂移；effort 明確寫：各模型的預設值不同（Opus 5.5／Haiku 5.5 是 medium，Sonnet 5.5 是 high）
+            self.assertRegex(d.model or "", r"^claude-[a-z]+-\d+-\d+$", name)
+            self.assertIn(d.effort, EFFORTS, name)
+            for extra in (d.fallbackModel, d.visionModel):
+                if extra:
+                    self.assertRegex(extra, r"^claude-[a-z]+-\d+-\d+$", name)
+            self.assertNotEqual(d.fallbackModel, d.model, f"{name}：備援模型不能和主要模型相同")
+
+    def test_selection_matches_each_task(self):
+        from learnloop.agents import EFFORTS, load_agents
+        a = load_agents()
+        producers = [n for n in a if n != "reviewer"]
+        # 逐檔平行、純文字擷取：所有 agent 中最便宜的一級；但要看圖的來源會升級
+        self.assertEqual(self.tier(a["ingest-document"].model), min(self.tier(d.model) for d in a.values()))
+        self.assertGreater(self.tier(a["ingest-document"].visionModel), self.tier(a["ingest-document"].model))
+        # 審核者是最後一道判斷：不比任何產出者弱、思考深度不低於任何產出者，而且不會悄悄換成較弱的備援模型
+        self.assertGreaterEqual(self.tier(a["reviewer"].model), max(self.tier(a[n].model) for n in producers))
+        self.assertGreaterEqual(EFFORTS.index(a["reviewer"].effort), max(EFFORTS.index(a[n].effort) for n in producers))
+        self.assertIsNone(a["reviewer"].fallbackModel)
+        # 大綱決定後面所有階段的結構：規劃者不比整理筆記的 agent 弱
+        self.assertGreaterEqual(self.tier(a["planner"].model), self.tier(a["organizer"].model))
+
+    def test_choose_model_rules(self):
+        from learnloop.agents import AgentDefinition, choose_model
+        d = AgentDefinition(description="", prompt="", model="claude-haiku-5-5", effort="high",
+                            fallbackModel="claude-sonnet-5-5", visionModel="claude-opus-5-5", visionEffort="medium")
+        c = choose_model(d)
+        self.assertEqual((c.model, c.effort, c.fallback, c.vision), ("claude-haiku-5-5", "high", "claude-sonnet-5-5", False))
+        c = choose_model(d, vision=True)
+        self.assertEqual((c.model, c.effort, c.fallback, c.vision), ("claude-opus-5-5", "medium", "claude-sonnet-5-5", True))
+        # 統一覆寫（測試省錢用）：不走看圖路線、不設備援，避免悄悄換回貴的模型；effort 照舊
+        c = choose_model(d, override="claude-haiku-5-5", vision=True)
+        self.assertEqual((c.model, c.effort, c.fallback, c.vision, c.override), ("claude-haiku-5-5", "high", None, False, True))
+        # 備援與主要模型相同時不設（CLI 不接受）
+        d.fallbackModel = "claude-opus-5-5"
+        self.assertIsNone(choose_model(d, vision=True).fallback)
+        with self.assertRaises(ValueError):
+            from learnloop.agents import _effort
+            _effort("extreme", "x.md")
+
+    def test_pipeline_routes_each_session_to_its_model(self):
+        from learnloop.mock import MockRunner
+        p = self.make_project(n_docs=1)
+        img = self.tmp / "board.tmp"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
+        p.add_source("板書.png", img)  # 圖片：前處理標成 needs_vision
+        cfg = load_config()
+        runner = MockRunner(cfg)
+        self.assertEqual(asyncio.run(Pipeline(Project(p.id, cfg), runner=runner).run()), "done")
+        seen = {(role, target): c for role, target, c in runner.choices}
+        self.assertEqual(seen[("ingest-document", "s01")].model, "claude-haiku-5-5")
+        self.assertEqual(seen[("ingest-document", "s02")].model, "claude-opus-5-5")
+        self.assertTrue(seen[("ingest-document", "s02")].vision)
+        self.assertEqual((seen[("reviewer", None)].model, seen[("reviewer", None)].effort), ("claude-opus-5-5", "high"))
+        self.assertEqual(seen[("fact-checker", None)].model, "claude-sonnet-5-5")
+        # 狀態檔記下每個 worker 與階段實際用的模型，監控介面據此顯示
+        st = Project(p.id, cfg).state["stages"]
+        self.assertEqual(st["ingest"]["workers"]["s02"]["model"], "claude-opus-5-5")
+        self.assertEqual(st["compose"]["model"], "claude-opus-5-5")
+        started = [e for e in self.events(p) if e["type"] == "attempt_started"]
+        self.assertTrue(started and all(e.get("model") and e.get("effort") for e in started))
+
+    def test_override_applies_to_every_session(self):
+        from learnloop.mock import MockRunner
+        os.environ["LP_MODEL"] = "claude-haiku-5-5"
+        p = self.make_project(n_docs=1)
+        cfg = load_config()
+        runner = MockRunner(cfg)
+        self.assertEqual(asyncio.run(Pipeline(Project(p.id, cfg), runner=runner).run()), "done")
+        self.assertTrue(all(c.model == "claude-haiku-5-5" and c.fallback is None for _, _, c in runner.choices))
+
+    def test_sdk_session_gets_model_effort_and_fallback(self):
+        try:
+            import claude_agent_sdk as sdk
+        except ImportError:
+            self.skipTest("沒有安裝 claude-agent-sdk")
+        from unittest import mock
+        from learnloop.agents import choose_model
+        from learnloop.runner import SdkRunner
+        captured = []
+
+        async def fake_query(*, prompt, options):
+            captured.append(options)
+            if False:
+                yield None
+
+        cfg = load_config()
+        runner = SdkRunner(cfg)
+        kw = dict(prompt="x", project_dir=self.tmp, budget_usd=0.5, emit=lambda *a, **k: None)
+        with mock.patch.object(sdk, "query", fake_query):
+            asyncio.run(runner.run(role="reviewer", gate=None, **kw))
+            asyncio.run(runner.run(role="ingest-document", gate="ingest", target="s01",
+                                   choice=choose_model(runner.agents["ingest-document"], vision=True), **kw))
+            cfg.model_override = "claude-haiku-5-5"
+            asyncio.run(runner.run(role="slide-composer", gate="compose", **kw))
+        got = [(o.model, o.effort, o.fallback_model) for o in captured]
+        self.assertEqual(got, [("claude-opus-5-5", "high", None),
+                               ("claude-opus-5-5", "medium", "claude-sonnet-5-5"),
+                               ("claude-haiku-5-5", "medium", None)])
+        self.assertNotIn("Write", captured[0].tools)  # 審核者仍是唯讀
+
+    def test_headless_loop_passes_the_same_selection_to_the_cli(self):
+        if not shutil.which("jq"):
+            self.skipTest("沒有 jq")
+        fakebin = self.tmp / "bin"
+        fakebin.mkdir()
+        (fakebin / "claude").write_text(
+            '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$FAKE_CLAUDE_ARGS"\n'
+            'printf "%s|%s" "${CLAUDE_CODE_SESSION_ID-unset}" "${CLAUDE_CODE_REMOTE_SESSION_ID-unset}" > "$FAKE_CLAUDE_ARGS.env"\n'
+            'echo \'{"session_id":"s1","subtype":"success","is_error":false,"total_cost_usd":0}\'\n', encoding="utf-8")
+        (fakebin / "claude").chmod(0o755)
+        proj = self.tmp / "proj"
+        (proj / "raw" / "s01").mkdir(parents=True)
+
+        def run(agent: str, gate: str, vision: bool, **env) -> list[str]:
+            (proj / "raw" / "s01" / "meta.json").write_text(json.dumps({"needs_vision": vision}), encoding="utf-8")
+            args = self.tmp / "args.txt"
+            e = {**os.environ, "PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}", "MAX_ROUNDS": "1",
+                 "FAKE_CLAUDE_ARGS": str(args), "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_REMOTE_SESSION_ID": "parent",
+                 **env}
+            cmd = ["bash", str(ROOT / "scripts" / "loop.sh"), str(proj), gate, agent, "任務"]
+            subprocess.run(cmd + (["--target", "s01"] if gate == "ingest" else []), env=e,
+                           capture_output=True, text=True, timeout=120)
+            return args.read_text(encoding="utf-8").splitlines()
+
+        def flag(argv: list[str], name: str) -> str | None:
+            return argv[argv.index(name) + 1] if name in argv else None
+
+        a = run("ingest-document", "ingest", vision=False)
+        self.assertEqual((flag(a, "--model"), flag(a, "--effort"), flag(a, "--fallback-model")),
+                         ("claude-haiku-5-5", "high", "claude-sonnet-5-5"))
+        a = run("ingest-document", "ingest", vision=True)
+        self.assertEqual((flag(a, "--model"), flag(a, "--effort")), ("claude-opus-5-5", "medium"))
+        a = run("slide-composer", "compose", vision=False, MODEL="claude-haiku-5-5", EFFORT="low")
+        self.assertEqual((flag(a, "--model"), flag(a, "--effort"), flag(a, "--fallback-model")),
+                         ("claude-haiku-5-5", "low", None))
+        # 在 Claude Code 裡執行時，不可沿用上層 session 的 ID
+        self.assertEqual((self.tmp / "args.txt.env").read_text(encoding="utf-8"), "|")
+
+    def test_agent_sessions_never_inherit_the_parent_session_id(self):
+        # 從 Claude Code（雲端 session、/loop）裡啟動時，這兩個變數會讓所有 agent 共用上層的 session ID：
+        # 平行的 agent 寫進同一份紀錄、重試時 resume 到別人的對話（實際執行時發現）
+        from learnloop.runner import session_env
+        env = session_env(load_config(), self.tmp, "compose", None)
+        self.assertEqual(env.get("CLAUDE_CODE_SESSION_ID"), "")
+        self.assertEqual(env.get("CLAUDE_CODE_REMOTE_SESSION_ID"), "")
+
+
+class TestDeckLimits(Base):
+    """大綱的章節數必須放得進允許的張數（實際執行時發現：期望 6 張卻排了 4 章，編排者怎麼改都過不了）。"""
+
+    def test_chapter_cap_follows_the_slide_range(self):
+        cfg = load_config()
+        self.assertEqual(gates.deck_limits({"slide_target": 6}, cfg), (6, 9, 6, 2))
+        self.assertEqual(gates.deck_limits({"slide_target": 12}, cfg), (6, 18, 12, 6))
+        self.assertEqual(gates.deck_limits({"slide_target": 40}, cfg)[3], 8)  # 不超過大綱 schema 的 8 章
+        self.assertEqual(gates.deck_limits({"slide_target": None}, cfg)[2], 12)
+
+    def test_plan_gate_rejects_more_chapters_than_the_deck_can_hold(self):
+        p = self.make_project()
+        self.assertEqual(self.run_pipeline(p), "done")  # 模擬的大綱有 3 章，預設 12 張放得下
+        cfg = load_config()
+        p.update_settings({"slide_target": 6})          # 最多 9 張 → 只容得下 2 章
+        g = gates.check(p.dir, "plan", None, cfg)
+        self.assertFalse(g.ok)
+        self.assertIn("只容得下 2 章", " ".join(g.errors))
+        p.update_settings({"slide_target": 8})          # 最多 12 張 → 3 章
+        self.assertTrue(gates.check(p.dir, "plan", None, cfg).ok)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

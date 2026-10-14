@@ -2,7 +2,9 @@
 name: integrator
 description: 把查證結果與補充資料併入筆記，產出定稿 work/notes.final.md 與處理紀錄 work/integration.json
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: claude-sonnet-5-5              # 依規則修訂與逐項交代，機械部分由閘門把關
+effort: medium
+fallbackModel: claude-opus-5-5
 maxTurns: 30
 ---
 
