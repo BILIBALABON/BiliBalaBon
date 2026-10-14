@@ -91,8 +91,10 @@ def cmd_gate(args) -> int:
     return gates.main(argv)
 
 
-# 內建 CLI 2.1.294 起才認得 .claude/agents/ 指定的 5.5 世代模型（舊版會照錯的單價計費）
+# Claude Code CLI 2.1.294 起才認得 .claude/agents/ 指定的 5.5 世代模型（舊版會照錯的單價計費）。
+# orchestrator 用 SDK 內建的 CLI（SDK 0.2.165 內建 2.1.294）；scripts/loop.sh 用系統上的 claude。
 MIN_SDK = "0.2.165"
+MIN_CLI = "2.1.294"
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:
@@ -110,11 +112,11 @@ def doctor_report() -> list[dict]:
     add("Python", sys.version_info >= (3, 11), sys.version.split()[0] + "（需要 3.11 以上）")
     try:
         import claude_agent_sdk
-        v = claude_agent_sdk.__version__
-        ok = _version_tuple(v) >= _version_tuple(MIN_SDK)
+        v = str(getattr(claude_agent_sdk, "__version__", "") or "版本不明")
+        ok = bool(_version_tuple(v)) and _version_tuple(v) >= _version_tuple(MIN_SDK)
         add("Claude Agent SDK", ok or cfg.mock, v if ok else
             f"{v}：需要 {MIN_SDK} 以上（pip install -U claude-agent-sdk）。舊版內建的 CLI 不認得 agent 檔指定的模型，花費與預算上限會算錯")
-    except ImportError:
+    except Exception:
         add("Claude Agent SDK", cfg.mock, "未安裝：pip install claude-agent-sdk" + ("（模擬模式不需要）" if cfg.mock else ""))
     claude = shutil.which("claude")
     if claude:
@@ -122,7 +124,9 @@ def doctor_report() -> list[dict]:
             v = subprocess.run([claude, "--version"], capture_output=True, text=True, timeout=20).stdout.strip()
         except Exception:
             v = "已安裝"
-        add("Claude Code CLI", True, v + "（SDK 內建 CLI；headless 腳本 scripts/loop.sh 會用到這個）", "選用")
+        new_enough = bool(_version_tuple(v)) and _version_tuple(v) >= _version_tuple(MIN_CLI)
+        add("Claude Code CLI", new_enough, (v + "（SDK 內建 CLI；headless 腳本 scripts/loop.sh 會用到這個）") if new_enough else
+            f"{v}：scripts/loop.sh 需要 {MIN_CLI} 以上（claude update），舊版不認得 agent 檔指定的模型，花費會算錯", "選用")
     else:
         add("Claude Code CLI", False, "找不到 claude 指令。SDK 內建一份，不影響監控介面；scripts/loop.sh 需要它", "選用")
     add("ffmpeg", shutil.which("ffmpeg") and shutil.which("ffprobe"), "音檔與影片前處理需要", "音檔／影片")

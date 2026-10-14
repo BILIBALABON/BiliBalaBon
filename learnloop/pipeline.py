@@ -414,6 +414,12 @@ class Pipeline:
         if not g.ok:
             raise Halt("failed", f"{STAGE_LABELS[stage]}未通過檢查：" + "；".join(g.errors[:3]))
 
+    def _ingest_key(self, src: dict) -> str:
+        """沿用來源整理的依據：原檔沒變，而且會用同一個模型整理。
+        例如先用 models.override 以便宜的模型試跑、之後改回正式選型時，舊的整理要重做。"""
+        choice = self._model_choice(INGEST_ROLE[src["kind"]], src["id"])
+        return f"{upload_sig(self.p, src)}|{choice.model or ''}"
+
     async def stage_ingest(self) -> None:
         sources = self._active_sources()
         done_path = self.p.state_dir / "ingested.json"
@@ -422,8 +428,8 @@ class Pipeline:
         for s in sources:
             sid = s["id"]
             self._worker("ingest", sid)["label"] = s["filename"]
-            if done.get(sid) == upload_sig(self.p, s) and gates.check(self.p.dir, "ingest", sid, self.cfg).ok:
-                self._set("ingest", sid, status="passed")  # 原檔沒變、整理結果也還合格：沿用
+            if done.get(sid) == self._ingest_key(s) and gates.check(self.p.dir, "ingest", sid, self.cfg).ok:
+                self._set("ingest", sid, status="passed")  # 原檔與選用的模型都沒變、整理結果也還合格：沿用
             else:
                 todo.append(s)
         n = min(len(todo), self.cfg.max_parallel) or 1
@@ -441,7 +447,7 @@ class Pipeline:
             if result == "skipped":
                 self._skip_source(sid)
             else:
-                done[sid] = upload_sig(self.p, src)
+                done[sid] = self._ingest_key(src)
                 atomic_write_json(done_path, done)
 
         await self._gather([one(s) for s in todo])
