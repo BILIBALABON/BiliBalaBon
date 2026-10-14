@@ -19,6 +19,7 @@ agent 的定義只寫在 Markdown 檔這一處：互動式 Claude Code、headles
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -71,11 +72,13 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         raise ValueError("frontmatter 沒有結尾的 ---")
     fm: dict = {}
     for line in text[3:end].splitlines():
-        line = line.split(" #", 1)[0].rstrip()  # 去掉行尾註解
-        if not line.strip() or ":" not in line:
+        if not line.strip() or line.lstrip().startswith("#") or ":" not in line:
             continue
         k, v = line.split(":", 1)
-        fm[k.strip()] = v.strip().strip("\"'")
+        v = v.strip()
+        quoted = re.match(r'^(["\'])(.*?)\1(\s+#.*)?$', v)
+        # 和 YAML 一樣：引號內的 # 是內容；否則「空白＋#」之後是註解（空白可以是 tab）
+        fm[k.strip()] = quoted.group(2) if quoted else re.sub(r"\s+#.*$", "", v)
     body = text[end + 4:].lstrip("\n")
     return fm, body
 

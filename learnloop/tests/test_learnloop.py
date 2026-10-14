@@ -77,8 +77,13 @@ class Base(unittest.TestCase):
         self._old = dict(os.environ)
         os.environ.update({"LP_PROJECTS_DIR": str(self.tmp / "projects"), "LP_MOCK": "1", "LP_MOCK_DELAY": "0",
                            "LP_MOCK_COST": "0.02", "LP_INCIDENT_TIMEOUT": "1", "LP_MOCK_FAIL": "", **self.ENV})
-        for k in ("LP_CONFIG", "LP_MODEL", "LP_LINKCHECK"):
+        for k in ("LP_CONFIG", "LP_MODEL", "LP_EFFORT", "LP_LINKCHECK"):
             os.environ.pop(k, None)
+        # 測試不受使用者在 config.toml 設的 models.override 影響（文件建議試跑時這樣設）
+        import re
+        cfg_text = re.sub(r"(?m)^override\s*=.*$", 'override = ""', (ROOT / "config.toml").read_text(encoding="utf-8"))
+        (self.tmp / "config.toml").write_text(cfg_text, encoding="utf-8")
+        os.environ["LP_CONFIG"] = str(self.tmp / "config.toml")
 
     def tearDown(self):
         os.environ.clear()
@@ -1082,6 +1087,8 @@ class TestModelSelection(Base):
         self.assertEqual(asyncio.run(Pipeline(Project(p.id, cfg), runner=runner).run()), "done")
         seen = {(role, target): c for role, target, c in runner.choices}
         self.assertEqual(seen[("ingest-document", "s01")].model, "claude-haiku-5-5")
+        self.assertFalse(seen[("ingest-document", "s01")].vision)
+        self.assertEqual(seen[("ingest-document", "s01")].fallback, "claude-sonnet-5-5")
         self.assertEqual(seen[("ingest-document", "s02")].model, "claude-opus-5-5")
         self.assertTrue(seen[("ingest-document", "s02")].vision)
         self.assertEqual((seen[("reviewer", None)].model, seen[("reviewer", None)].effort), ("claude-opus-5-5", "high"))
@@ -1089,7 +1096,8 @@ class TestModelSelection(Base):
         # 狀態檔記下每個 worker 與階段實際用的模型，監控介面據此顯示
         st = Project(p.id, cfg).state["stages"]
         self.assertEqual(st["ingest"]["workers"]["s02"]["model"], "claude-opus-5-5")
-        self.assertEqual(st["compose"]["model"], "claude-opus-5-5")
+        self.assertEqual(st["compose"]["model"], "claude-sonnet-5-5")
+        self.assertEqual(st["plan"]["model"], "claude-opus-5-5")
         started = [e for e in self.events(p) if e["type"] == "attempt_started"]
         self.assertTrue(started and all(e.get("model") and e.get("effort") for e in started))
 
@@ -1097,10 +1105,57 @@ class TestModelSelection(Base):
         from learnloop.mock import MockRunner
         os.environ["LP_MODEL"] = "claude-haiku-5-5"
         p = self.make_project(n_docs=1)
+        img = self.tmp / "board.tmp"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
+        p.add_source("板書.png", img)
         cfg = load_config()
         runner = MockRunner(cfg)
         self.assertEqual(asyncio.run(Pipeline(Project(p.id, cfg), runner=runner).run()), "done")
-        self.assertTrue(all(c.model == "claude-haiku-5-5" and c.fallback is None for _, _, c in runner.choices))
+        self.assertTrue(all(c.model == "claude-haiku-5-5" and c.fallback is None and not c.vision
+                            for _, _, c in runner.choices))
+
+    def test_ingest_made_by_another_model_is_redone(self):
+        # 先用統一覆寫的模型試跑，之後改回正式選型（文字講義用 Haiku 5.5）並加入新檔：別的模型做的整理不能沿用
+        from learnloop.mock import MockRunner
+        os.environ["LP_MODEL"] = "claude-sonnet-5-5"
+        p = self.make_project(n_docs=1)
+        self.assertEqual(self.run_pipeline(p), "done")
+        os.environ.pop("LP_MODEL")
+        f = self.tmp / "extra.tmp"
+        f.write_text(DOC, encoding="utf-8")
+        p.add_source("講義2.md", f)
+        cfg = load_config()
+        runner = MockRunner(cfg)
+        self.assertEqual(asyncio.run(Pipeline(Project(p.id, cfg), runner=runner).run()), "done")
+        redone = {t for role, t, _ in runner.choices if role == "ingest-document"}
+        self.assertEqual(redone, {"s01", "s02"})
+        # 模型沒變時照常沿用：再加一個檔，只整理新的那個
+        g = self.tmp / "extra2.tmp"
+        g.write_text(DOC, encoding="utf-8")
+        p.add_source("講義3.md", g)
+        runner = MockRunner(cfg)
+        self.assertEqual(asyncio.run(Pipeline(Project(p.id, cfg), runner=runner).run()), "done")
+        self.assertEqual({t for role, t, _ in runner.choices if role == "ingest-document"}, {"s03"})
+
+    def test_frontmatter_comments_follow_yaml(self):
+        from learnloop.agents import _parse_frontmatter
+        fm, _ = _parse_frontmatter('---\nmodel: claude-haiku-5-5\t# 註解\ndescription: "a # b"\n# 整行註解\neffort: high  # x\n---\n')
+        self.assertEqual(fm, {"model": "claude-haiku-5-5", "description": "a # b", "effort": "high"})
+
+    def test_doctor_flags_an_sdk_that_does_not_know_the_models(self):
+        try:
+            import claude_agent_sdk
+        except ImportError:
+            self.skipTest("沒有安裝 claude-agent-sdk")
+        from unittest import mock
+        from learnloop.cli import doctor_report
+        os.environ.pop("LP_MOCK")
+        with mock.patch.object(claude_agent_sdk, "__version__", "0.2.159"):
+            row = next(r for r in doctor_report() if r["name"] == "Claude Agent SDK")
+        self.assertFalse(row["ok"])
+        self.assertIn("0.2.165", row["detail"])
+        with mock.patch.object(claude_agent_sdk, "__version__", "0.10.0"):
+            self.assertTrue(next(r for r in doctor_report() if r["name"] == "Claude Agent SDK")["ok"])
 
     def test_sdk_session_gets_model_effort_and_fallback(self):
         try:
@@ -1129,7 +1184,7 @@ class TestModelSelection(Base):
         got = [(o.model, o.effort, o.fallback_model) for o in captured]
         self.assertEqual(got, [("claude-opus-5-5", "high", None),
                                ("claude-opus-5-5", "medium", "claude-sonnet-5-5"),
-                               ("claude-haiku-5-5", "medium", None)])
+                               ("claude-haiku-5-5", "high", None)])
         self.assertNotIn("Write", captured[0].tools)  # 審核者仍是唯讀
 
     def test_headless_loop_passes_the_same_selection_to_the_cli(self):
@@ -1150,6 +1205,7 @@ class TestModelSelection(Base):
             args = self.tmp / "args.txt"
             e = {**os.environ, "PATH": f"{fakebin}{os.pathsep}{os.environ['PATH']}", "MAX_ROUNDS": "1",
                  "FAKE_CLAUDE_ARGS": str(args), "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_REMOTE_SESSION_ID": "parent",
+                 "MODEL": "gpt-x", "EFFORT": "max",  # 一般名稱的環境變數不可影響選型
                  **env}
             cmd = ["bash", str(ROOT / "scripts" / "loop.sh"), str(proj), gate, agent, "任務"]
             subprocess.run(cmd + (["--target", "s01"] if gate == "ingest" else []), env=e,
@@ -1164,7 +1220,7 @@ class TestModelSelection(Base):
                          ("claude-haiku-5-5", "high", "claude-sonnet-5-5"))
         a = run("ingest-document", "ingest", vision=True)
         self.assertEqual((flag(a, "--model"), flag(a, "--effort")), ("claude-opus-5-5", "medium"))
-        a = run("slide-composer", "compose", vision=False, MODEL="claude-haiku-5-5", EFFORT="low")
+        a = run("slide-composer", "compose", vision=False, LP_MODEL="claude-haiku-5-5", LP_EFFORT="low")
         self.assertEqual((flag(a, "--model"), flag(a, "--effort"), flag(a, "--fallback-model")),
                          ("claude-haiku-5-5", "low", None))
         # 在 Claude Code 裡執行時，不可沿用上層 session 的 ID

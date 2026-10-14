@@ -33,6 +33,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}   # 用這次執行的 token（已授權 issues: write），不必另外安裝 GitHub App
           prompt: |
             LearnLoop 在 learnloop/ 子資料夾。執行 `claude --help`，比對 learnloop/scripts/loop.sh、learnloop/scripts/dev-loop.sh
             與 learnloop/learnloop/runner.py 用到的旗標與選項

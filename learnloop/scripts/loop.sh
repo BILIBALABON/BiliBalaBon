@@ -15,8 +15,8 @@
 # 環境變數：
 #   MAX_ROUNDS=3      外層迴圈輪數上限
 #   BUDGET_USD=1.00   每一輪的 --max-budget-usd（CLI 只收美元）
-#   MODEL=            統一覆寫模型（測試省錢用；同時停用備援模型與看圖路線）
-#   EFFORT=           覆寫 agent 檔指定的思考深度（low / medium / high / xhigh / max）
+#   LP_MODEL=         統一覆寫模型（測試省錢用；同時停用備援模型與看圖路線）。也可寫在 config.toml 的 models.override
+#   LP_EFFORT=        覆寫 agent 檔指定的思考深度（low / medium / high / xhigh / max）
 #
 # 模型、思考深度與備援模型照 .claude/agents/<agent>.md 的選型（見 docs/模型選型.md）；
 # 擷取階段的來源若需要看圖（raw/<代號>/meta.json 的 needs_vision），會改用該 agent 的 visionModel。
@@ -51,9 +51,9 @@ VISION=""
 if [ -n "$TARGET" ] && [ "$(jq -r '.needs_vision // false' "$PROJECT_DIR/raw/$TARGET/meta.json" 2>/dev/null)" = "true" ]; then
   VISION=1
 fi
-CHOICE="$(LP_MODEL="${MODEL:-${LP_MODEL:-}}" python3 -m learnloop.agents --choose "$AGENT" ${VISION:+--vision})" || exit 2
+CHOICE="$(python3 -m learnloop.agents --choose "$AGENT" ${VISION:+--vision})" || exit 2
 MODEL="$(jq -r '.model // empty' <<<"$CHOICE")"
-EFFORT="${EFFORT:-$(jq -r '.effort // empty' <<<"$CHOICE")}"
+EFFORT="${LP_EFFORT:-$(jq -r '.effort // empty' <<<"$CHOICE")}"
 FALLBACK="$(jq -r '.fallback // empty' <<<"$CHOICE")"
 MAX_TURNS="$(python3 -m learnloop.agents --field "$AGENT" maxTurns)"
 ALLOW=()
@@ -95,7 +95,7 @@ for i in $(seq 1 "$MAX_ROUNDS"); do
       --setting-sources "" \
       --settings "$SETTINGS" \
       --output-format json \
-      --allowedTools "${ALLOW[@]}" < /dev/null)" || true
+      ${ALLOW[@]+--allowedTools "${ALLOW[@]}"} < /dev/null)" || true
 
   NEW_SID="$(jq -r '.session_id // empty' <<<"$OUT" 2>/dev/null || true)"
   [ -n "$NEW_SID" ] && SID="$NEW_SID"

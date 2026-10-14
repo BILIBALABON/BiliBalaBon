@@ -2,9 +2,9 @@
 name: slide-composer
 description: 把定稿筆記編排成適合閱讀與學習的簡報，安排示意圖與說明影片，產出 work/deck.json
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: claude-opus-5-5                # 最終成品＋SVG 版面計算；審核退回都回到這裡，一次做好最省
-effort: medium
-fallbackModel: claude-sonnet-5-5
+model: claude-sonnet-5-5              # 產出者中輸出量最大（實測），版面由閘門檢查、內容由 Opus 審核：中階模型＋high 算 SVG 版面
+effort: high
+fallbackModel: claude-opus-5-5
 maxTurns: 30
 ---
 
