@@ -51,6 +51,28 @@ Claude 的登入：在這台電腦執行過 `claude` 並完成 `/login`，或設
 | 編排簡報 | `work/deck.json` | 必備頁面、每張條列數與字數上限、講解備註、至少一張示意圖（字級夠大、只含繪圖元素）、網址都查證過 |
 | 審核 | `work/review.json` | 結論通過、沒有重大問題、四項評分都 ≥ 4 |
 
+## 模型選型
+
+每個 agent 依自己的任務選模型與思考深度（effort），寫在 `.claude/agents/<名稱>.md` 的 frontmatter。
+原則：以「每完成一件工作的成本」比較，預設用 Sonnet 5.5；逐檔平行、照格式忠實擷取的工作降到 Haiku 5.5；
+產出小但影響全局、判斷本身就是工作、或品質取決於讀圖的工作升到 Opus 5.5。理由與價格見 [`docs/模型選型.md`](docs/模型選型.md)。
+
+| agent | 模型 | effort | 為什麼 |
+|---|---|---|---|
+| ingest-document | Haiku 5.5（要看圖的來源改用 Opus 5.5／medium） | high | 每檔一個、平行；讀文字、照固定格式整理。掃描檔與板書照片要讀圖才升級 |
+| ingest-audio | Sonnet 5.5 | medium | 要靠領域知識還原語音辨識的同音錯字 |
+| ingest-video | Opus 5.5 | medium | 逐張讀關鍵畫面（投影片、板書、圖表），讀圖精準度決定品質 |
+| planner | Opus 5.5 | high | 產出很小，但後面每個階段都依大綱工作 |
+| organizer | Sonnet 5.5 | medium | 長篇寫作、輸出量大 |
+| fact-checker | Sonnet 5.5 | high | 多輪搜尋；判定對錯是「查證過」的核心 |
+| enricher | Sonnet 5.5 | medium | 搜尋與挑選 |
+| integrator | Sonnet 5.5 | medium | 依規則修訂，機械部分由閘門把關 |
+| slide-composer | Opus 5.5 | medium | 最終成品與 SVG 版面；審核退回都回到這裡 |
+| reviewer | Opus 5.5 | high | 最後一道判斷；不設備援模型，避免悄悄換成較弱的審核者 |
+
+其餘 agent 在主要模型過載或無法使用時，自動改用 `fallbackModel`。`python3 -m learnloop.agents --list` 會印出目前的選型；
+監控介面的階段詳情與即時紀錄會顯示每個 session 實際用的模型與 effort。
+
 ## 需要你決定的時候
 
 系統遇到自己解決不了的事會暫停，並在監控介面跳出視窗，列出問題與建議的處置方式：
@@ -91,11 +113,11 @@ Claude 的登入：在這台電腦執行過 `claude` 並完成 `/login`，或設
 | `limits.max_review_rounds` | 2 | 審核不過時自動退回修改的次數 |
 | `limits.max_parallel` | 3 | 同時執行的 agent 數 |
 | `limits.incident_timeout_s` | 0 | 等你回覆的秒數；0 = 一直等。無人值守時設成正數，逾時採用預設選項（一律是停止） |
-| `models.override` | 空 | 填 `haiku` 可讓所有 agent 改用便宜的模型（測試用） |
+| `models.override` | 空 | 填 `claude-haiku-5-5` 可讓所有 agent 改用最便宜的模型（測試用；同時停用備援模型與看圖路線）。環境變數 `LP_MODEL` 同義 |
 | `transcribe.engine` | faster-whisper | 語音辨識引擎；`command` 可接自己的指令 |
 | `linkcheck.mode` | strict | `strict` 失效連結會被擋下；`warn` 只警告；`off` 不檢查 |
 
-agent 的角色、工具與模型在 `.claude/agents/*.md`，共同規則在 `CLAUDE.md`。改這些檔案就能調整行為，不必動程式。
+agent 的角色、工具、模型與 effort 在 `.claude/agents/*.md`，共同規則在 `CLAUDE.md`。改這些檔案就能調整行為，不必動程式。
 
 ## 音檔與影片
 
@@ -131,7 +153,7 @@ scripts/loop.sh projects/<專案代號> compose slide-composer "請把 work/note
 | 本機收件匣（建議） | `python3 -m learnloop watch ~/學習收件匣`：裡面每個子資料夾會變成一個專案並自動執行。搭配 `incident_timeout_s` 或環境變數 `LP_INCIDENT_TIMEOUT` | 電腦要開著；遇到需要決定的事會停在那個階段等你 |
 | 系統排程 | cron／工作排程器定時執行 `python3 -m learnloop watch <資料夾> --once` | 同上 |
 | Claude Code `/loop` | 在開著的 session 輸入 `/loop 30m 執行 python3 -m learnloop watch inbox --once 並回報結果` | session 要開著；7 天後過期 |
-| Routines（`/schedule`）、GitHub Actions | 在雲端執行，**碰不到這台電腦上的檔案與語音辨識**，不適合用來整理資料。`.github/workflows/` 附了兩個範例：CI 跑測試、每週檢查 CLI 相容性 | Routines 最短間隔 1 小時 |
+| Routines（`/schedule`）、GitHub Actions | 在雲端執行，**碰不到這台電腦上的檔案與語音辨識**，不適合用來整理資料。repo 根目錄的 `.github/workflows/learnloop-*.yml` 附了兩個範例：CI 跑測試、每週檢查 CLI 相容性 | Routines 最短間隔 1 小時 |
 
 ## 安全
 
@@ -146,13 +168,14 @@ scripts/loop.sh projects/<專案代號> compose slide-composer "請把 work/note
 ## 目錄
 
 ```
-.claude/agents/*.md      10 個 agent 的角色定義（唯一來源，orchestrator 與腳本共用）
+.claude/agents/*.md      10 個 agent 的角色定義與模型選型（唯一來源，orchestrator 與腳本共用）
 .claude/hooks/stop-gate.sh   Stop hook 閘門
 .claude/settings.json    在 repo 根目錄互動式使用 Claude Code 時載入的 hook 與拒絕規則
 CLAUDE.md                所有 agent 的共同規則
 config.toml              所有上限與開關
 learnloop/
   pipeline.py            orchestrator：外層迴圈、平行、預算、處置單
+  agents.py              讀 agent 定義；決定每個 session 用哪個模型與 effort
   runner.py              用 Agent SDK 啟動單一 session；mock.py 是不呼叫模型的模擬版
   gates.py  schemas.py   閘門與資料契約
   preprocess.py          書面擷取、語音辨識、關鍵畫面
@@ -164,7 +187,7 @@ learnloop/
 scripts/loop.sh          headless 外層迴圈（單一階段）
 scripts/dev-loop.sh      開發這套系統本身用：在 git worktree 裡改程式直到測試通過
 tests/                   自動測試（python3 -m unittest discover -s tests）
-docs/                    優化後的 prompt、可行性審查、介面截圖、一份實測產出的範例簡報
+docs/                    優化後的 prompt、可行性審查、模型選型、介面截圖、一份實測產出的範例簡報
 projects/<代號>/         每個專案的資料：uploads/ raw/ work/ output/ 與狀態檔
 ```
 

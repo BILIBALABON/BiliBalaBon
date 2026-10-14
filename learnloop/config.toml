@@ -30,7 +30,8 @@ incident_timeout_s = 0           # 等待人工處置的秒數；0 = 一直等�
 max_upload_mb = 500
 
 [models]
-override = ""                    # 留空則使用各 agent 檔的 model；測試時可填 "haiku" 降低花費
+override = ""                    # 留空則照各 agent 檔的選型（model／effort／fallbackModel，見 docs/模型選型.md）。
+                                 # 測試時可填 "claude-haiku-5-5"：所有 agent 統一改用最便宜的模型，並停用備援與看圖路線
 
 [transcribe]
 engine = "faster-whisper"        # faster-whisper | command | none

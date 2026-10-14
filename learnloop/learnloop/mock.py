@@ -55,6 +55,7 @@ class MockRunner:
             k, _, n = item.partition(":")
             self.fail[k.strip()] = int(n or 1)
         self.calls: dict[str, int] = {}
+        self.choices: list = []  # 每次呼叫拿到的模型選型（測試用）
 
     def _should_fail(self, *keys: str) -> bool:
         """同一個對象的第 N 次呼叫，N ≤ 設定值時回傳 True。"""
@@ -64,8 +65,11 @@ class MockRunner:
 
     async def run(self, *, role: str, prompt: str, project_dir: Path, gate: str | None,
                   target: str | None = None, resume: str | None = None, budget_usd: float,
-                  emit: Emit, output_schema: dict | None = None, label: str = "", round_no: int = 1) -> RunResult:
-        emit("agent_activity", role=role, label=label, kind="text", text=f"（模擬）{role} 開始工作")
+                  emit: Emit, output_schema: dict | None = None, label: str = "", round_no: int = 1,
+                  choice=None) -> RunResult:
+        self.choices.append((role, target, choice))
+        model = f"（實際執行會用 {choice.model}／effort {choice.effort}）" if choice else ""
+        emit("agent_activity", role=role, label=label, kind="text", text=f"（模擬）{role} 開始工作{model}")
         await asyncio.sleep(self.delay)
         pdir = Path(project_dir)
         work = pdir / "work"

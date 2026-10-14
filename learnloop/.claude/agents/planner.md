@@ -2,7 +2,9 @@
 name: planner
 description: 讀完所有來源整理後，規劃學習目標與章節大綱，產出 work/outline.json
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: claude-opus-5-5                # 產出很小、但後面每個階段都依它工作：槓桿最大，用最強的判斷力
+effort: high
+fallbackModel: claude-sonnet-5-5
 maxTurns: 20
 ---
 
@@ -37,7 +39,7 @@ maxTurns: 20
 ## 規則
 
 - 章節依「學習順序」排，不是依來源順序：先備概念在前，應用與延伸在後。多份來源講同一件事要合併成一章。
-- 2 到 8 章；每章 2 到 6 個重點。章節代號從 `sec1` 起連號。
+- 至少 2 章，最多不超過任務說明寫的「大綱章節上限」（閘門會檢查）；每章 2 到 6 個重點。章節代號從 `sec1` 起連號。
 - 每一份 `material` 來源都要被至少一章引用；`reference` 來源只在確實用到時引用。
 - 張數有限：依期望投影片張數估算，重點太多就取捨，把次要內容留給筆記。
 - 不要在大綱加入來源沒有的主題；想到值得補充的方向寫進 `open_questions`，交給查證與補充階段處理。

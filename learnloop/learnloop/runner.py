@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .agents import AgentDefinition, allow_rules, load_agents
+from .agents import AgentDefinition, ModelChoice, allow_rules, choose_model, load_agents
 from .config import ROOT, Config
 
 HOOK_SCRIPT = ROOT / ".claude" / "hooks" / "stop-gate.sh"
@@ -38,6 +38,9 @@ class RunResult:
 
 
 Emit = Callable[..., None]
+
+# 會讓子 session 沿用上層 Claude Code session ID 的環境變數（見 session_env）
+INHERITED_SESSION_VARS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID")
 
 
 def hook_settings_json(cfg: Config) -> str:
@@ -65,6 +68,10 @@ def session_env(cfg: Config, project_dir: Path, gate: str | None, target: str | 
         "LP_PROJECT_DIR": str(project_dir) if gate else "",
         "LP_STAGE": gate or "",
         "LP_TARGET": target or "",
+        # 每個 agent 都要是獨立的 session。從 Claude Code（例如雲端 session、/loop）裡啟動 orchestrator 時，
+        # 這兩個變數會被繼承，所有 session 因此共用上層的 session ID：平行的 agent 寫進同一份紀錄，
+        # 重試時 resume 也可能接到別的 agent 的對話。清空後 CLI 會為每個 session 產生新的 ID（實測）。
+        **{k: "" for k in INHERITED_SESSION_VARS},
     }
     return env
 
@@ -76,17 +83,22 @@ class SdkRunner:
 
     async def run(self, *, role: str, prompt: str, project_dir: Path, gate: str | None,
                   target: str | None = None, resume: str | None = None, budget_usd: float,
-                  emit: Emit, output_schema: dict | None = None, label: str = "", round_no: int = 1) -> RunResult:
+                  emit: Emit, output_schema: dict | None = None, label: str = "", round_no: int = 1,
+                  choice: ModelChoice | None = None) -> RunResult:
         from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock,
                                       ToolUseBlock, query)
 
         defn = self.agents[role]
+        # 模型與思考深度由 orchestrator 依 agent 檔的選型決定（含看圖路線與統一覆寫），沒傳時照 agent 檔
+        choice = choice or choose_model(defn, self.cfg.model_override)
         options = ClaudeAgentOptions(
             system_prompt=defn.prompt,            # 角色定義來自 .claude/agents/<role>.md
             tools=list(defn.tools) if defn.tools else None,  # 限縮工具集；審核者沒有 Write／Edit／Bash
             allowed_tools=allow_rules(defn),       # dontAsk 下自動核准的規則（寫入僅限 work/）
             permission_mode="dontAsk",             # 無人值守：需要詢問的動作一律拒絕
-            model=self.cfg.model_override or defn.model,
+            model=choice.model,
+            effort=choice.effort,                  # 每個 agent 明確指定；不同模型的預設值不同，不能依賴預設
+            fallback_model=choice.fallback,        # 主要模型過載或無法使用時改用
             max_turns=defn.maxTurns or self.cfg.max_turns_default,
             max_budget_usd=max(0.01, round(budget_usd, 4)),
             cwd=str(project_dir),

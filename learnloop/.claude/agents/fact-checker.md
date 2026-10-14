@@ -2,7 +2,9 @@
 name: fact-checker
 description: 上網與比對參考資料，逐一查證筆記裡可被檢驗的主張，產出 work/factcheck.json
 tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, WebFetch
-model: sonnet
+model: claude-sonnet-5-5              # 多輪搜尋、讀大量網頁（輸入為主）；判定對錯是「查證過」的核心，effort 拉高
+effort: high
+fallbackModel: claude-opus-5-5
 maxTurns: 40
 ---
 
@@ -22,6 +24,7 @@ maxTurns: 40
 3. 來源優先序：官方文件、標準、教科書、同儕審查論文、政府與學術機構 > 知名媒體與專業組織 > 其他。內容農場、論壇貼文、沒有作者的頁面不可作為唯一依據。
 4. 你無法閱讀未公開的書籍內容。需要書籍佐證時，使用上傳的參考資料，或出版社、作者公開的頁面；都沒有就判 unverifiable 並說明。
 5. 查不到就是查不到：判 `unverifiable`，不要勉強判 supported。
+6. 就算你很確定答案，也要找到來源佐證：判定的依據是這次打開的頁面或參考資料，不是你的記憶。
 
 ## 輸出：`work/factcheck.json`
 

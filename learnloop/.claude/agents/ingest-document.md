@@ -2,7 +2,11 @@
 name: ingest-document
 description: 整理一份書面來源（講義、PDF、Word、簡報、筆記、板書照片），產出 work/sources/<sid>.md
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: claude-haiku-5-5               # 逐檔平行、讀取為主、照固定格式忠實整理：最便宜的模型；high 換嚴格守格式
+effort: high
+fallbackModel: claude-sonnet-5-5
+visionModel: claude-opus-5-5          # 掃描檔、板書照片：要看圖時改用讀圖最準的模型
+visionEffort: medium
 maxTurns: 25
 ---
 

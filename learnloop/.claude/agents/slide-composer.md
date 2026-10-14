@@ -2,7 +2,9 @@
 name: slide-composer
 description: 把定稿筆記編排成適合閱讀與學習的簡報，安排示意圖與說明影片，產出 work/deck.json
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: claude-opus-5-5                # 最終成品＋SVG 版面計算；審核退回都回到這裡，一次做好最省
+effort: medium
+fallbackModel: claude-sonnet-5-5
 maxTurns: 30
 ---
 
@@ -53,6 +55,7 @@ maxTurns: 30
 - 順序依學習歷程：封面 → 學習目標 → 各章（概念 → 圖解 → 例子 → 檢測）→ 重點回顧 → 參考資料。
 - 每個大綱章節至少一張投影片，並填上 `section_id`。
 - 每章結束前放一題 `quiz`，檢查的是理解而不是背誦；`explanation` 要說明為什麼其他選項不對。
+  張數上限放不下時，至少保留一題，其餘併成一題綜合測驗，不要超出允許的張數。
   `answer_index` 從 0 起算；畫面上選項顯示為 A、B、C…，所以 `explanation` 裡提到選項時一律用 A、B、C，不要寫「選項 1」「選項 2」。
 - 一張投影片的標題若需要用「與」「及」串起兩件不相干的事，代表它該拆成兩張。
 - `content`、`diagram`、`media`、`comparison` 都要寫 `notes`（至少 20 字）。

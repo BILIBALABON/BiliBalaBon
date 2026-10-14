@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -90,6 +91,14 @@ def cmd_gate(args) -> int:
     return gates.main(argv)
 
 
+# 內建 CLI 2.1.294 起才認得 .claude/agents/ 指定的 5.5 世代模型（舊版會照錯的單價計費）
+MIN_SDK = "0.2.165"
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+
+
 def doctor_report() -> list[dict]:
     """環境檢查，監控介面的「系統狀態」也用這份。"""
     cfg = load_config()
@@ -101,7 +110,10 @@ def doctor_report() -> list[dict]:
     add("Python", sys.version_info >= (3, 11), sys.version.split()[0] + "（需要 3.11 以上）")
     try:
         import claude_agent_sdk
-        add("Claude Agent SDK", True, claude_agent_sdk.__version__)
+        v = claude_agent_sdk.__version__
+        ok = _version_tuple(v) >= _version_tuple(MIN_SDK)
+        add("Claude Agent SDK", ok or cfg.mock, v if ok else
+            f"{v}：需要 {MIN_SDK} 以上（pip install -U claude-agent-sdk）。舊版內建的 CLI 不認得 agent 檔指定的模型，花費與預算上限會算錯")
     except ImportError:
         add("Claude Agent SDK", cfg.mock, "未安裝：pip install claude-agent-sdk" + ("（模擬模式不需要）" if cfg.mock else ""))
     claude = shutil.which("claude")

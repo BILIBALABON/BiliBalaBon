@@ -32,7 +32,9 @@ for i in $(seq 1 "$MAX_ROUNDS"); do
   fi
   echo "── 第 $i/$MAX_ROUNDS 輪" >&2
   # 權限：只開放編輯與「python3 -m unittest」「git diff／status」；其餘需要詢問的動作一律拒絕
-  OUT="$(cd "$([ -d "$WT" ] && echo "$WT" || echo "$ROOT")" && claude -p "$P" "${EXTRA[@]}" \
+  # 在 Claude Code 裡執行時清空繼承來的 session ID 變數，否則會沿用上層的 session、resume 到別人的對話
+  OUT="$(cd "$([ -d "$WT" ] && echo "$WT" || echo "$ROOT")" && \
+    CLAUDE_CODE_SESSION_ID= CLAUDE_CODE_REMOTE_SESSION_ID= claude -p "$P" "${EXTRA[@]}" \
       --permission-mode dontAsk --max-turns 30 --max-budget-usd "$BUDGET_USD" --output-format json ${MODEL:+--model "$MODEL"} \
       --allowedTools "Read" "Grep" "Glob" "Edit" "Write" "Bash(python3 -m unittest *)" "Bash(git diff *)" "Bash(git status *)" \
       < /dev/null)" || true

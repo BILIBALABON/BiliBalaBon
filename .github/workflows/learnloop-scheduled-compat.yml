@@ -6,11 +6,14 @@
 #
 # 使用前：到 repo 的 Settings → Secrets 新增 ANTHROPIC_API_KEY（金鑰只放 secrets，不要進 repo）。
 # 注意：排程只會在預設分支執行；公開 repo 連續 60 天沒有活動，GitHub 會自動停用排程。
-name: scheduled-compat
+name: learnloop-scheduled-compat
 on:
   schedule:
     - cron: "17 1 * * 1"   # 每週一 09:17（台北時間）
   workflow_dispatch:
+defaults:
+  run:
+    working-directory: learnloop
 permissions:
   contents: read
   issues: write
@@ -31,9 +34,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            執行 `claude --help`，比對 scripts/loop.sh、scripts/dev-loop.sh 與 learnloop/runner.py 用到的旗標與選項
+            LearnLoop 在 learnloop/ 子資料夾。執行 `claude --help`，比對 learnloop/scripts/loop.sh、learnloop/scripts/dev-loop.sh
+            與 learnloop/learnloop/runner.py 用到的旗標與選項
             （--system-prompt、--tools、--allowedTools、--permission-mode dontAsk、--max-turns、--max-budget-usd、
-            --setting-sources、--settings、--output-format json、--resume、-w）。
+            --model、--effort、--fallback-model、--setting-sources、--settings、--output-format json、--resume、-w）。
+            另外讀 learnloop/.claude/agents/*.md，確認每個 effort 值仍在 `claude --help` 列出的可用值內。
             任何一個不存在或說明有變，就用 `gh issue create` 開一張 issue 說明差異與建議修法；都相容就不要開 issue。
             不要修改任何檔案。
           claude_args: >-

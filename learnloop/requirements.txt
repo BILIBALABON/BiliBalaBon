@@ -1,5 +1,7 @@
 # 必要
-claude-agent-sdk>=0.2.159     # 內建 Claude Code CLI；模擬模式（LP_MOCK=1）不需要
+claude-agent-sdk>=0.2.165     # 內建 Claude Code CLI；模擬模式（LP_MOCK=1）不需要。
+                              # 0.2.165 內建的 CLI 2.1.294 才認得 agent 檔指定的 5.5 世代模型；
+                              # 舊版仍能執行，但把模型當成「不認得」，花費會算錯（實測 Haiku 5.5 被高估約 35 倍），預算上限跟著失準
 fastapi>=0.115
 uvicorn>=0.30
 python-multipart>=0.0.9       # 檔案上傳
