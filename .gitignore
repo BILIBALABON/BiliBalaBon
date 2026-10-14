@@ -1,0 +1,9 @@
+projects/*
+!projects/.gitkeep
+__pycache__/
+*.pyc
+.env
+.env.*
+.claude/worktrees/
+.claude/settings.local.json
+inbox/

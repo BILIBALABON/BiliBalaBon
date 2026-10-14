@@ -1,0 +1,56 @@
+# LearnLoop 設定檔 —— 所有上限都在這裡，改完重新啟動即可生效。
+
+[paths]
+projects_dir = "projects"        # 專案資料夾（已列入 .gitignore，不進版控）
+
+[budget]
+# Agent SDK 只有 max_budget_usd（美元）。這裡用新台幣設定，由 orchestrator 換算。
+usd_twd_rate = 32.0              # 1 美元 = 幾元新台幣，請依當下匯率調整
+default_project_budget_ntd = 600 # 新專案預設花費上限（新台幣）。花費主要來自查證與補充的網路搜尋，
+                                 # 教材越長、要查的主張越多就越高；不夠時系統會暫停並問你要不要追加
+
+# 每個階段最多可用掉專案預算的比例（單一 session 的 max_budget_usd 由此算出）
+[budget.stage_share]
+ingest = 0.25
+plan = 0.08
+organize = 0.15
+verify = 0.30
+integrate = 0.12
+compose = 0.20
+review = 0.12
+
+[limits]
+max_attempts = 3                 # 外層迴圈：每個階段最多跑幾輪
+max_review_rounds = 2            # 審核不通過時，最多退回修改幾次
+max_parallel = 3                 # asyncio 同時執行的 agent session 數
+max_concurrent_subagents = 4     # 轉給 CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS
+stop_hook_max_blocks = 3         # Stop hook 在同一個 session 最多攔截幾次（退出條件）
+max_turns_default = 30           # agent 檔沒寫 maxTurns 時使用
+incident_timeout_s = 0           # 等待人工處置的秒數；0 = 一直等。無人值守時設成正數，逾時採用預設選項
+max_upload_mb = 500
+
+[models]
+override = ""                    # 留空則使用各 agent 檔的 model；測試時可填 "haiku" 降低花費
+
+[transcribe]
+engine = "faster-whisper"        # faster-whisper | command | none
+model = "small"                  # faster-whisper 模型大小：tiny / base / small / medium / large-v3
+language = ""                    # 留空自動偵測；中文課程可填 "zh"
+command = ""                     # engine = "command" 時使用，例如：whisper-cli -m model.bin -f {audio} -osrt -of {out}
+
+[video]
+max_frames = 24                  # 每支影片最多擷取幾張關鍵畫面
+scene_threshold = 0.30           # ffmpeg 場景變化門檻，越小擷取越多
+
+[linkcheck]
+mode = "strict"                  # strict：連結失效就擋下；warn：只警告；off：不檢查
+timeout_s = 10
+
+[review]
+min_score = 4                    # 審核四項評分（1–5）都要達到這個分數才算通過
+
+[gates]
+min_claims = 5                   # 查證階段至少要檢查幾個主張
+min_slides = 6
+max_bullets = 6
+max_bullet_chars = 80
