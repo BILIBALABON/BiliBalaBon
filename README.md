@@ -155,7 +155,7 @@ scripts/loop.sh projects/<專案代號> compose slide-composer "請把 work/note
 | 本機收件匣（建議） | `python3 -m learnloop watch ~/學習收件匣`：裡面每個子資料夾會變成一個專案並自動執行。搭配 `incident_timeout_s` 或環境變數 `LP_INCIDENT_TIMEOUT` | 電腦要開著；遇到需要決定的事會停在那個階段等你 |
 | 系統排程 | cron／工作排程器定時執行 `python3 -m learnloop watch <資料夾> --once` | 同上 |
 | Claude Code `/loop` | 在開著的 session 輸入 `/loop 30m 執行 python3 -m learnloop watch inbox --once 並回報結果` | session 要開著；7 天後過期 |
-| Routines（`/schedule`）、GitHub Actions | 在雲端執行，**碰不到這台電腦上的檔案與語音辨識**，不適合用來整理資料。repo 根目錄的 `.github/workflows/learnloop-*.yml` 附了兩個範例：CI 跑測試、每週檢查 CLI 相容性 | Routines 最短間隔 1 小時 |
+| Routines（`/schedule`）、GitHub Actions | 在雲端執行，**碰不到這台電腦上的檔案與語音辨識**，不適合用來整理資料。`.github/workflows/ci.yml` 只在每次 push／PR 跑自動測試（不呼叫模型、不需要金鑰） | Routines 最短間隔 1 小時 |
 
 ## 安全
 
@@ -203,4 +203,4 @@ projects/<代號>/         每個專案的資料：uploads/ raw/ work/ output/ �
 - 模型選型（`docs/模型選型.md`）：每個 model ID、effort、備援旗標與審核者的結構化輸出都以真實呼叫確認可用；
   選型的成品品質與實際花費沒有以真實流程量測（見該文件「實測與估算」）。
 - **未驗證**：真正的語音辨識引擎、對真實網站的連結檢查與 YouTube 影片檢查（測試環境連不到外部網站）、
-  預設選型的品質與實際花費、每週排程的相容性檢查工作流程、Windows、一小時以上的長教材。
+  預設選型的品質與實際花費、Windows、一小時以上的長教材。
